@@ -1,43 +1,1074 @@
-<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#173f5f"><link rel="manifest" href="manifest.webmanifest"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><title>Chuze Personal Workout</title><style>body{font-family:Arial;margin:0;background:#f3f5f7;color:#17212b}header{background:#173f5f;color:#fff;padding:16px;text-align:center}main{max-width:950px;margin:auto;padding:12px}.card{background:#fff;padding:15px;margin:12px 0;border-radius:15px;box-shadow:0 2px 8px #0001}button{padding:11px 13px;margin:4px;border:0;border-radius:10px;font-weight:700}button:disabled{opacity:.4}.p{background:#173f5f;color:white}.f{background:#d9ead3}.s{background:#fce5cd}.b{background:#d9eaf7}.d{background:#f4cccc}.y{background:#fff2cc}.timer{font-size:56px;text-align:center;font-weight:800}.center{text-align:center}.small{font-size:13px;color:#5c6770}.hidden{display:none}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px}.m{min-height:115px;text-align:left}.open{background:#d9ead3}.active{background:#fce5cd}.lock{background:#eee;color:#999}.done{background:#d9d9d9;color:#666}.return{background:#fff2cc}.bar{height:15px;background:#ddd;border-radius:8px;overflow:hidden}.bar i{display:block;height:100%;width:0;background:#4f81bd}.check{width:100%;border-collapse:collapse}.check th,.check td{padding:8px;border-bottom:1px solid #ddd;text-align:left}.cur{background:#eef5fb}.yes{background:#edf4ea}.notice{background:#f6f8fa;padding:10px;border-radius:10px;margin:8px 0}</style></head><body><header><h1>🏋️ Chuze Personal Workout</h1><div>v4 • 8/18/2026 field test</div></header><main>
-<section class="card" id="tmCard"><h2>🚶 Step 1 — Treadmill</h2><p class="small">45:00 target. Skip temporarily if occupied; end early if needed.</p><div id="tm" class="timer">45:00</div><div id="tms" class="center">Ready</div><div class="center"><button class="p" id="start">▶ Start</button><button class="b" id="tPause">⏸ Pause</button><button id="early">⏹ End Early</button><button id="skip">⏭️ Skip for Now</button><button id="tReset">↺ Reset</button></div></section>
-<section class="card hidden" id="store"><h2>🛒 Step 2 — Machine Store</h2><p class="small">Tap the machine you are physically using. Other machines lock while you work.</p><div class="bar"><i id="bar"></i></div><p class="center" id="prog">0 / 11 complete</p><div class="center"><button class="b" id="pause">⏸ Pause Workout</button><button id="dayReset">↺ Reset Today's Workout</button><button class="d" id="endDay">⏹ End Workout Today</button></div><p class="center small" id="pauseMsg"></p><div class="grid" id="machines"></div></section>
-<section class="card hidden" id="active"><h2 id="mn"></h2><p class="small" id="meta"></p><div class="notice" id="notice"></div><h3 id="stage"></h3><div id="list"></div><div class="card"><div class="small">REST TIMER</div><div class="timer" id="rt">1:15</div><div class="center" id="rs">Ready</div><div class="center"><button class="p" id="setDone">☑️ Set Complete → Start Selected Rest</button><br><button class="f" id="fast">▶ ⚡ Start 0:30</button><button class="s" id="std">▶ 🏗️ Start 1:15</button><button class="b" id="rp">⏸ Pause Rest</button><button class="p" id="ok">OK — Timer Finished</button></div><p class="small center">Timer stays on the selected duration until you switch it. At 0:00 the phone vibrates without sound. Press OK to advance.</p></div><div class="center"><button class="y" id="later">🟡 Machine Occupied — Save My Place</button><button id="stopMachine">⏹ Stop This Machine Today</button></div></section>
-<section class="card hidden center" id="finish"><h2>🏆 Workout Complete</h2><p id="finishText"></p><button class="p" id="resetAll">🔄 Reset Entire Workout</button></section>
-</main><script>
-const plan=[
-['Shoulder Press','Shoulders','58 lb',[['Shoulder Press',4,10]]],['Chest Press','Chest','65 lb',[['Chest Press',4,10]]],['Leg Extension','Quadriceps','85 lb',[['Leg Extension',4,10]]],['Lat Pulldown','Back','65 lb',[['Lat Pulldown',4,10]]],['Mid Row','Back','65 lb',[['Mid Row',4,10]]],['Seated Dip','Triceps','65 lb',[['Wide Side',4,10,'Rest → flip arms, drink, then Narrow Side'],['Narrow Side',4,10,'Final rest → wipe down and find next open machine']]],['Biceps Curl','Biceps','65 lb',[['Biceps Curl',4,10]]],['Leg Press','Legs','100 lb',[['Leg Press',4,10]]],['Abdominal & Obliques','Core','65 lb',[['Front Abs',4,10,'Rest → Left Obliques, drink'],['Left Obliques',4,10,'Rest → Right Obliques'],['Right Obliques',4,10,'Final rest → wipe down, drink, find next open machine']]],['Leg Curl','Hamstrings','80 lb',[['Leg Curl',4,10]]],['Arm Curl','Arms','30 lb',[['Arm Curl',4,10]]]
-].map(x=>({name:x[0],area:x[1],weight:x[2],stages:x[3].map(s=>({name:s[0],sets:s[1],reps:s[2],transition:s[3]||''})),state:'open',stage:0,done:[],dayStop:false}));
-let M=plan.map(x=>JSON.parse(JSON.stringify(x))), active=-1, tm=2700, tid=null, rid=null, rest=75, rem=75, restPaused=false, restDone=false, paused=false, vibrateOn=false, treadmillDone=false, tmEndAt=null, restEndAt=null, wakeLock=null;
-const $=x=>document.getElementById(x), fmt=s=>String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0');
-function vib(){
-  stopV();
-  vibrateOn=true;
-  const started=Date.now();
-  try{if(navigator.vibrate) navigator.vibrate(30000)}catch(e){}
-  window._vibTimer=setInterval(()=>{
-    if(!vibrateOn || Date.now()-started>=30000){stopV();return}
-    try{if(navigator.vibrate) navigator.vibrate(1000)}catch(e){}
-  },1000);
-}function stopV(){
-  vibrateOn=false;
-  if(window._vibTimer){clearInterval(window._vibTimer);window._vibTimer=null}
-  try{if(navigator.vibrate) navigator.vibrate(0)}catch(e){}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#123f5d">
+<title>Chuze DVD Flash Card Prototype v10.3</title>
+<style>
+:root{font-family:Arial,Helvetica,sans-serif;color:#17212b;background:#f4f6f8}
+*{box-sizing:border-box}
+body{margin:0}
+header{background:#123f5d;color:white;padding:18px 18px 14px;position:sticky;top:0;z-index:10}
+h1,h2,h3,p{margin-top:0}
+.headerline{font-size:14px;opacity:.9}
+main{max-width:720px;margin:auto;padding:18px}
+.card{background:white;border-radius:24px;padding:24px;box-shadow:0 5px 18px #0001;margin-bottom:16px;min-height:420px;display:flex;flex-direction:column;justify-content:space-between}
+.menu-card{min-height:0}
+.title{font-size:34px;font-weight:800;margin-bottom:8px}
+.subtitle{font-size:19px;color:#5e6972;margin-bottom:20px}
+.movie{border-radius:18px;padding:18px;margin:10px 0;border:2px solid #d9e2e8;background:#f8fafb;text-align:left;width:100%;font-size:20px;font-weight:700}
+.movie small{display:block;font-weight:400;color:#68737c;margin-top:6px}
+.movie.active{background:#fff1df;border-color:#e6b97c}
+.movie.done{background:#dff2df;border-color:#87c887}
+.movie.pending{background:#dcecf7;border-color:#82b6d6}
+.movie.occupied{background:#fff0bd;border-color:#e1bd54}
+.movie.locked{opacity:.45}
+button{border:0;border-radius:16px;padding:16px 20px;font-size:18px;font-weight:700;cursor:pointer}
+.primary{background:#123f5d;color:white}
+.secondary{background:#dcecf7;color:#123f5d}
+.green{background:#dff2df}
+.orange{background:#ffe5c5}
+.yellow{background:#fff0bd}
+.red{background:#f6cccc}
+.gray{background:#eceff1}
+.controls{display:grid;gap:12px;margin-top:18px}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.row button{flex:1;min-width:130px}
+.progress{height:13px;background:#ddd;border-radius:99px;overflow:hidden;margin:12px 0 18px}
+.progress > div{height:100%;background:#58b878;width:0%}
+.big{font-size:62px;font-weight:800;text-align:center;margin:20px 0}
+.center{text-align:center}
+.step{font-size:17px;color:#68737c}
+.checkbox{font-size:25px;margin-right:8px}
+.status{font-size:18px;font-weight:700;margin-top:10px}
+.note{background:#f1f4f6;border-radius:16px;padding:15px;font-size:17px}
+.nav{position:sticky;bottom:0;background:#f4f6f8;padding:12px 0 4px;display:flex;gap:10px}
+.nav button{flex:1}
+.hidden{display:none}
+.small{font-size:14px;color:#68737c}
+.modal-backdrop{position:fixed;inset:0;background:#0008;display:flex;align-items:center;justify-content:center;padding:20px;z-index:100}
+.modal{background:white;border-radius:24px;padding:24px;max-width:520px;width:100%;box-shadow:0 12px 40px #0005}
+.workout-controls{margin-top:18px;border:1px solid #d9e0e5;border-radius:18px;overflow:hidden}
+.workout-controls-toggle{width:100%;background:#eef2f5;border:0;padding:15px 18px;font-size:18px;font-weight:800;text-align:left}
+.workout-controls-panel{padding:14px;background:#f8fafb;display:grid;gap:10px}
+.workout-controls-panel[hidden]{display:none !important}
+.workout-controls-panel button{width:100%}
+.modal h2{font-size:30px;margin-bottom:10px}
+.modal p{font-size:18px;color:#5e6972;line-height:1.4}
+.summary-list{margin:16px 0 0;padding:0;list-style:none}
+.summary-list li{padding:11px 0;border-bottom:1px solid #e4e8eb;font-size:18px}
+.end-card{min-height:0}
+
+/* v10.3 — Manual 3D Digital Weight Reel Picker */
+.weight-picker{margin-top:18px;border:2px solid #d9e2e8;border-radius:20px;background:#f8fafb;padding:16px}
+.weight-picker-head{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
+.weight-picker-title{font-size:22px;font-weight:800}
+.weight-picker-current{font-size:18px;color:#5e6972}
+.reel-wrap{position:relative;height:190px;margin:14px auto 12px;max-width:360px;perspective:700px;overflow:hidden;border-radius:18px;background:linear-gradient(#e8edf1,#fdfefe 18%,#ffffff 50%,#fdfefe 82%,#e8edf1);border:2px solid #cfd9df}
+.reel-wrap:before,.reel-wrap:after{content:"";position:absolute;left:0;right:0;height:52px;z-index:3;pointer-events:none}
+.reel-wrap:before{top:0;background:linear-gradient(#dfe6eb,rgba(223,230,235,0))}
+.reel-wrap:after{bottom:0;background:linear-gradient(rgba(223,230,235,0),#dfe6eb)}
+.reel-center-line{position:absolute;left:8px;right:8px;top:69px;height:52px;border-top:2px solid #123f5d;border-bottom:2px solid #123f5d;border-radius:10px;z-index:4;pointer-events:none;box-shadow:0 0 0 2px #ffffff99}
+.weight-reel{position:absolute;left:0;right:0;top:50%;display:flex;flex-direction:column;align-items:center;gap:0;transform-style:preserve-3d;transition:transform .12s ease;will-change:transform}
+.weight-reel-item{height:42px;line-height:42px;font-size:21px;width:100%;text-align:center;font-weight:700;color:#68737c;opacity:.45;transform-style:preserve-3d;user-select:none}
+.weight-reel-item.center-weight{font-size:34px;color:#123f5d;opacity:1;font-weight:900}
+.weight-reel-item.near-weight{font-size:25px;opacity:.72}
+.weight-reel-controls{display:flex;justify-content:center;gap:8px}
+.weight-reel-controls button{padding:12px 16px;font-size:15px}
+.weight-spin-note{text-align:center;font-size:14px;color:#68737c;margin-top:9px}
+.weight-reel{touch-action:none;cursor:grab}
+.weight-reel.dragging{cursor:grabbing}
+.weight-reel-help{text-align:center;font-size:15px;color:#5e6972;margin:8px 0 2px;font-weight:700}
+.weight-chip{display:inline-block;background:#dcecf7;color:#123f5d;border-radius:999px;padding:5px 10px;font-weight:800}
+.movie-wrap{margin:10px 0 14px}
+.movie-wrap .movie{margin:0}
+.weight-menu-btn{width:100%;margin-top:7px;padding:11px 14px;font-size:15px}
+
+</style>
+</head>
+<body>
+<header>
+  <div style="font-size:24px;font-weight:800">🎬 CHUZE WORKOUT</div>
+  <div class="headerline" id="headerLine">Machine Store</div>
+</header>
+<main>
+  <div id="app"></div>
+</main>
+
+<script>
+const machines = [
+ ["Shoulder Press","Shoulders","58 lb"],
+ ["Chest Press","Chest","65 lb"],
+ ["Leg Extension","Quadriceps","85 lb"],
+ ["Lat Pulldown","Back","65 lb"],
+ ["Mid Row","Back","65 lb"],
+ ["Seated Dip","Triceps","65 lb"],
+ ["Biceps Curl","Biceps","65 lb"],
+ ["Leg Press","Legs","100 lb"],
+ ["Abdominal & Obliques","Core","65 lb"],
+ ["Leg Curl","Hamstrings","80 lb"],
+ ["Arm Curl","Arms","30 lb"]
+];
+
+// Exact weight stacks recorded from the user's Chuze machines.
+const machineWeights = [
+ [8,23,38,58,78,98,118,138,158,178,198,218,238,258,278,298,318,338],
+ [15,30,45,65,85,105,125,145,165,185,205,225,245,265,285,305,325,345],
+ [15,30,45,65,85,105,125,145,165,185,205,225,245],
+ [15,30,45,65,85,105,125,145,165,185,205,225,245,265,285,305,325,345],
+ [15,30,45,65,85,105,125,145,165,185,205,225,245,265,285,305,325,345],
+ [15,30,45,65,85,105,125,145,165,185,205,225,245,265,285,305,325,345],
+ [15,30,45,65,85,105,125,145,165,185,205,225,245,265,285,305,325,345],
+ [40,60,80,100,120,140,160,180,200,220,240,260,280,300,320,340,360,380],
+ [30,45,65,85,105,125,145,165,185,205,225,245,265,285,305,325,345],
+ [30,45,60,80,100,120,140,160,180,200,220,240,260,280,300,320,340,360],
+ [10,20,30,40,50,60,70,80,90,100,110,120,130,140,150,160,170,180,190,200]
+];
+
+// Today's chosen weight is separate from the machine's normal/default weight.
+let selectedWeights = machines.map((m,i)=>parseInt(m[2],10));
+let weightPickerMachine = null;
+let weightPickerIndex = 0;
+
+// Machines with multiple physical positions/sides have separate stages.
+// Each stage follows the same 4-set movie pattern.
+const machineStages = {
+  5: ["Seated Dips - Wide Side", "Seated Dips - Narrow Side"],
+  8: ["Abdominal & Obliques - Front Abs", "Abdominal & Obliques - Left Obliques", "Abdominal & Obliques - Right Obliques"]
+};
+
+let completed = Array(11).fill(false);
+let currentMachine = null;
+let currentStage = 0;
+let currentCard = 0;
+let setDone = Array(11).fill(0);
+// Weight actually used for each completed set.
+// Shape: machine -> part/stage -> set (0-3) -> pounds.
+let setWeights = machines.map((m,i) =>
+  getStages(i).map(() => Array(4).fill(null))
+);
+let showDetailedSetWeights = false;
+let resumeState = Array(11).fill(null);
+let occupiedState = Array(11).fill(false);
+let timer = null;
+let seconds = 0;
+let paused = false;
+
+const app = document.getElementById("app");
+const headerLine = document.getElementById("headerLine");
+
+function menu(){
+ clearTimer();
+ currentMachine=null;
+ headerLine.textContent=step2Unlocked ? "Step 2 — Machine Store" : "Step 1 — Treadmill";
+
+ let step2 = "";
+ if(step2Unlocked){
+   step2 = `
+   <section class="card menu-card" style="margin-top:18px">
+     <div>
+      <div class="title">🛒 Step 2 — Machine Store</div>
+      <div class="subtitle">Tap the machine you are physically using. Other machines lock while you work.</div>
+      <div class="progress"><div style="width:${completed.filter(Boolean).length/11*100}%"></div></div>
+      <div class="center" style="font-size:25px;font-weight:700">${completed.filter(Boolean).length} / 11 complete</div>
+      <div class="controls">
+        <button class="secondary" onclick="pauseWorkout()">⏸️ Pause Workout</button>
+        <button class="gray" onclick="resetWorkout()">↻ Reset Today's Workout</button>
+        <button class="red" onclick="requestEndWorkout()">◻️ End Workout Today</button>
+      </div>
+      <div id="movies"></div>
+     </div>
+   </section>`;
+ }
+
+ app.innerHTML=`
+ <section class="card menu-card">
+   <div>
+    <div class="title">🚶 Step 1 — Treadmill</div>
+    <div class="subtitle">45:00 target. Step 2 stays hidden until you Start, Skip for Now, or End Early.</div>
+    <div class="big" id="treadmillTime">${fmt(treadmillSeconds)}</div>
+    <div class="controls">
+      <div class="row">
+        <button class="primary" onclick="startTreadmill()">▶️ Start</button>
+        <button class="secondary" onclick="pauseTreadmill()">⏸️ Pause</button>
+      </div>
+      <div class="row">
+        <button class="yellow" onclick="skipTreadmill()">⏭️ Skip for Now</button>
+        <button class="gray" onclick="endTreadmillEarly()">◻️ End Early</button>
+      </div>
+    </div>
+    <div class="note">
+      🔒 <b>Step 2 is locked and hidden.</b><br><br>
+      Press <b>Start</b>, <b>Skip for Now</b>, or <b>End Early</b> to unlock and unveil the Machine Store.
+    </div>
+   </div>
+ </section>
+ ${step2}`;
+
+ if(step2Unlocked){
+   const movies=document.getElementById("movies");
+   machines.forEach((m,i)=>{
+     const b=document.createElement("button");
+     const pending=!!resumeState[i] && !completed[i] && !occupiedState[i];
+     const occupied=!!occupiedState[i] && !completed[i];
+     b.className="movie "+(completed[i]?"done":occupied?"occupied":pending?"pending":"");
+     let status = "OPEN";
+     let icon = "🎬 ";
+     if(completed[i]){
+       status = "COMPLETE";
+       icon = "✅ ";
+     } else if(occupied){
+       status = "MACHINE OCCUPIED • RETURN LATER";
+       icon = "🟨 ";
+     } else if(pending){
+       status = "PENDING • RETURN LATER";
+       icon = "🔵 ";
+     }
+     b.innerHTML=`${icon}${m[0]}<small>${m[1]} • ${selectedWeights[i]} lb • ${status}${(pending||occupied) ? " • "+resumeLabel(i) : ""}</small>`;
+     if(!completed[i]) b.onclick=()=>startMachine(i);
+     else b.disabled=true;
+     const wrap=document.createElement("div");
+     wrap.className="movie-wrap";
+     wrap.appendChild(b);
+     const wb=document.createElement("button");
+     wb.className="secondary weight-menu-btn";
+     wb.type="button";
+     wb.textContent=`🎰 Choose Today's Weight • ${selectedWeights[i]} lb`;
+     wb.onclick=(e)=>{ e.stopPropagation(); openWeightPicker(i); };
+     wrap.appendChild(wb);
+     movies.appendChild(wrap);
+   });
+ }
 }
-function render(){let d=0,b=$('machines');b.innerHTML='';M.forEach((m,i)=>{let all=m.stage>=m.stages.length&&!m.dayStop;if(all)d++;let st=all?'done':m.state==='active'?'active':m.state==='locked'?'lock':m.state==='return'?'return':'open',stage=m.stages[Math.min(m.stage,m.stages.length-1)],n=m.done[m.stage]||0;let x=document.createElement('button');x.className='m '+st;x.innerHTML='<b>'+m.name+'</b><br>'+m.weight+'<br>'+stage.name+': '+n+'/'+stage.sets+' × '+stage.reps+'<br>'+(all?'🔴 COMPLETE':m.dayStop?'⚫ STOPPED TODAY':m.state==='active'?'🟠 ACTIVE':m.state==='locked'?'🔒 LOCKED':m.state==='return'?'🟡 RETURN LATER':'🟢 OPEN');if(m.state==='open'&&!all&&!m.dayStop)x.onclick=()=>select(i);if(m.state==='return'){x.disabled=false;x.onclick=()=>{m.state='open';$('pauseMsg').textContent='🟢 Marked open. Tap again when you are physically on it.';render()}}else x.disabled=m.state!=='open';b.appendChild(x)});$('bar').style.width=d/11*100+'%';$('prog').textContent=d+' / 11 complete';if(d===11){$('finish').classList.remove('hidden');$('finishText').textContent='All 11 stations complete. Completed sets/stages remain recorded.'}}
-function checklist(){let m=M[active],s=m.stages[m.stage],n=m.done[m.stage]||0,r='';for(let i=0;i<s.sets;i++)r+='<tr class="'+(i<n?'yes':i===n?'cur':'')+'"><td>'+(i<n?'☑️':'⬜')+'</td><td>Set '+(i+1)+'</td><td>Reps '+s.reps+'</td><td>Rest '+(rest===30?'0:30':'1:15')+'</td></tr>';return '<table class="check"><tr><th></th><th>Set</th><th>Reps</th><th>After</th></tr>'+r+'</table><p class="small">Progress only moves forward. Pausing preserves the exact place.</p>'}
-function select(i){if(paused)return;active=i;M.forEach((m,j)=>{if(m.state==='open')m.state=j===i?'active':'locked'});let m=M[i],s=m.stages[m.stage];$('mn').textContent=m.name;$('meta').textContent=m.area+' • '+m.weight+' • Stage '+(m.stage+1)+' of '+m.stages.length;$('stage').textContent=s.name;$('notice').textContent=s.transition||'Final rest is your transition: wipe down, drink, fix weight, and find the next open machine.';$('list').innerHTML=checklist();setRest(rest);$('active').classList.remove('hidden');render()}
-function setRest(x){rest=x;rem=x;restDone=false;restEndAt=null;$('rt').textContent=fmt(x);$('rs').textContent=x===30?'⚡ Fast rest selected — ready':'🏗️ Standard rest selected — ready';$('rp').textContent='⏸ Pause Rest';$('ok').disabled=true}
-function startRest(){if(active<0||paused)return;clearInterval(rid);rem=rest;restDone=false;restPaused=false;restEndAt=Date.now()+rest*1000;$('rt').textContent=fmt(rem);$('rs').textContent='⏱️ Rest running';$('ok').disabled=true;rid=setInterval(()=>{if(paused||restPaused)return;rem=Math.max(0,Math.ceil((restEndAt-Date.now())/1000));$('rt').textContent=fmt(rem);if(rem<=0){clearInterval(rid);rid=null;restEndAt=null;restDone=true;vib();$('rs').textContent='📳 0:00 — vibrating for up to 30 seconds. Press OK to stop.';$('ok').disabled=false}},250)}
-function ack(){if(!restDone)return;stopV();restDone=false;restEndAt=null;restPaused=false;let m=M[active],s=m.stages[m.stage],n=m.done[m.stage]||0;if(n<s.sets)m.done[m.stage]=n+1;$('rt').textContent=fmt(rest);$('rs').textContent='Ready for next set';$('ok').disabled=true;$('list').innerHTML=checklist();let nd=m.done[m.stage]||0;if(nd>=s.sets){if(m.stage<m.stages.length-1){m.stage++;let ns=m.stages[m.stage];$('stage').textContent=ns.name;$('meta').textContent=m.area+' • '+m.weight+' • Stage '+(m.stage+1)+' of '+m.stages.length;$('notice').textContent=s.transition||'Transition to next stage.';$('list').innerHTML=checklist()}else{m.state='done';$('active').classList.add('hidden');active=-1;M.forEach(x=>{if(x.state==='locked')x.state='open'});render()}}}
-function later(){if(active<0)return;stopV();clearInterval(rid);M[active].state='return';$('active').classList.add('hidden');$('pauseMsg').textContent='🟡 '+M[active].name+' saved. Your completed sets are preserved.';active=-1;M.forEach(x=>{if(x.state==='locked')x.state='open'});render()}
-function stopMachine(){if(active<0)return;stopV();clearInterval(rid);M[active].dayStop=true;M[active].state='done';$('active').classList.add('hidden');active=-1;M.forEach(x=>{if(x.state==='locked')x.state='open'});$('pauseMsg').textContent='⏹ Machine stopped for today. Completed work remains recorded.';render()}
-function togglePause(){paused=!paused;$('pause').textContent=paused?'▶ Resume Workout':'⏸ Pause Workout';$('pauseMsg').textContent=paused?'⏸️ Paused — restroom/interruption safe.':'▶️ Resumed — exact place preserved.';if(paused)stopV()}
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){if(tid&&tmEndAt){tm=Math.max(0,Math.ceil((tmEndAt-Date.now())/1000));$('tm').textContent=fmt(tm);if(tm<=0)openStore('🏁 45:00 complete — machine store unlocked')}if(rid&&restEndAt&&!restPaused&&!paused){rem=Math.max(0,Math.ceil((restEndAt-Date.now())/1000));$('rt').textContent=fmt(rem);if(rem<=0){clearInterval(rid);rid=null;restEndAt=null;restDone=true;vib();$('rs').textContent='📳 0:00 — vibrating for up to 30 seconds. Press OK to stop.';$('ok').disabled=false}}}});function openStore(msg){treadmillDone=true;clearInterval(tid);tid=null;tmEndAt=null;$('tms').textContent=msg;$('store').classList.remove('hidden');$('skip').disabled=true;render()}
-async function keepAwake(){try{if('wakeLock' in navigator){wakeLock=await navigator.wakeLock.request('screen')}}catch(e){}}
-$('start').onclick=()=>{if(tid||treadmillDone||paused)return;keepAwake();tmEndAt=Date.now()+tm*1000;$('tms').textContent='Walking/running — 45:00 countdown active';tid=setInterval(()=>{if(paused)return;tm=Math.max(0,Math.ceil((tmEndAt-Date.now())/1000));$('tm').textContent=fmt(tm);if(tm<=0)openStore('🏁 45:00 complete — machine store unlocked')},250)};
-$('tPause').onclick=()=>{if(tid){tm=Math.max(0,Math.ceil((tmEndAt-Date.now())/1000));clearInterval(tid);tid=null;tmEndAt=null;$('tm').textContent=fmt(tm);$('tPause').textContent='▶ Resume';$('tms').textContent='Paused'}else if(!treadmillDone&&tm<2700)$('start').click()};$('early').onclick=()=>{if(!paused&&!treadmillDone){tm=tmEndAt?Math.max(0,Math.ceil((tmEndAt-Date.now())/1000)):tm;openStore('⏹ Treadmill ended early at '+fmt(2700-tm)+' — machine store unlocked')}};$('skip').onclick=()=>{if(!paused){$('tms').textContent='⏭️ Treadmill temporarily skipped — return later.';$('store').classList.remove('hidden');render()}};$('tReset').onclick=()=>{clearInterval(tid);tid=null;tm=2700;treadmillDone=false;$('tm').textContent='45:00';$('tms').textContent='Ready';$('skip').disabled=false};
-$('fast').onclick=()=>{setRest(30);startRest()};$('std').onclick=()=>{setRest(75);startRest()};$('setDone').onclick=()=>startRest();$('rp').onclick=()=>{if(!rid&&!restDone)return;if(restDone)return;if(!restPaused){rem=Math.max(0,Math.ceil((restEndAt-Date.now())/1000));restEndAt=null;restPaused=true;$('rt').textContent=fmt(rem);$('rp').textContent='▶ Resume Rest';$('rs').textContent='⏸️ Rest paused'}else{restEndAt=Date.now()+rem*1000;restPaused=false;$('rp').textContent='⏸ Pause Rest';$('rs').textContent='⏱️ Rest running'}};$('ok').onclick=ack;$('later').onclick=later;$('stopMachine').onclick=stopMachine;$('pause').onclick=togglePause;$('endDay').onclick=()=>{if(active>=0)stopMachine();else{paused=true;$('pauseMsg').textContent='⏹ Workout ended for today. Recorded progress is preserved.'}};
-function reset(){clearInterval(tid);clearInterval(rid);stopV();tmEndAt=null;restEndAt=null;M=plan.map(x=>JSON.parse(JSON.stringify(x)));active=-1;tm=2700;rest=75;rem=75;paused=false;restPaused=false;restDone=false;treadmillDone=false;$('tm').textContent='45:00';$('tms').textContent='Ready';$('skip').disabled=false;$('active').classList.add('hidden');$('finish').classList.add('hidden');$('pauseMsg').textContent='';$('pause').textContent='⏸ Pause Workout';$('ok').disabled=true;render()}$('dayReset').onclick=reset;$('resetAll').onclick=reset;render();
-</script><script>
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(()=>{});
-</script></body></html>
+
+let treadmillSeconds = 2700;
+let treadmillTimer = null;
+let treadmillPaused = false;
+let step2Unlocked = false;
+let workoutStartedAt = null;
+let workoutEndedAt = null;
+let workoutEndReason = null;
+
+function beginWorkoutSession(){
+ if(!workoutStartedAt) workoutStartedAt = new Date();
+}
+
+function renderTreadmill(){
+ const el=document.getElementById("treadmillTime");
+ if(el) el.textContent=fmt(treadmillSeconds);
+}
+function startTreadmill(){
+ beginWorkoutSession();
+ step2Unlocked=true;
+ menu();
+ if(treadmillTimer) return;
+ treadmillPaused=false;
+ treadmillTimer=setInterval(()=>{
+   if(!treadmillPaused){
+     treadmillSeconds=Math.max(0,treadmillSeconds-1);
+     renderTreadmill();
+     if(treadmillSeconds===0){
+       clearInterval(treadmillTimer); treadmillTimer=null;
+       step2Unlocked=true;
+       navigator.vibrate?.(30000);
+       menu();
+     }
+   }
+ },1000);
+}
+function pauseTreadmill(){
+ treadmillPaused=true;
+}
+function resumeTreadmill(){
+ treadmillPaused=false;
+ if(!treadmillTimer && treadmillSeconds>0) startTreadmill();
+}
+function skipTreadmill(){
+ beginWorkoutSession();
+ if(treadmillTimer){clearInterval(treadmillTimer);treadmillTimer=null;}
+ treadmillSeconds=2700; treadmillPaused=false;
+ step2Unlocked=true;
+ menu();
+ window.scrollTo({top:document.body.scrollHeight,behavior:"smooth"});
+}
+function endTreadmillEarly(){
+ beginWorkoutSession();
+ if(treadmillTimer){clearInterval(treadmillTimer);treadmillTimer=null;}
+ treadmillPaused=false;
+ step2Unlocked=true;
+ menu();
+ window.scrollTo({top:document.body.scrollHeight,behavior:"smooth"});
+}
+
+function resumeLabel(i){
+ const r=resumeState[i];
+ if(!r) return "";
+ const stages=getStages(i);
+ const stageName=stages[r.stage] || stages[0];
+ const cardNo=Math.min(4, Math.max(1, r.card+1));
+ return r.scene==="rest"
+   ? `${stageName} • REST ${cardNo}/4`
+   : `${stageName} • SET ${cardNo}/4`;
+}
+
+function saveMachineProgress(){
+ if(currentMachine===null) return;
+ const i=currentMachine;
+ const stage=currentStage;
+ const card=currentCard;
+ const scene=document.getElementById("nextSceneBtn") ? "rest" : "work";
+ const remaining=scene==="rest" ? Math.max(0, seconds) : null;
+ resumeState[i]={stage, card, scene, seconds:remaining};
+}
+
+function toggleWorkoutControls(button){
+ const panel=button.nextElementSibling;
+ if(!panel) return;
+ panel.hidden=!panel.hidden;
+ const arrow=button.querySelector("span");
+ if(arrow) arrow.textContent=panel.hidden ? "▼" : "▲";
+}
+
+function showControlConfirmation(title, message, yesText, yesClass, onYes){
+ const existing=document.querySelector(".modal-backdrop");
+ if(existing) return;
+
+ const wrap=document.createElement("div");
+ wrap.className="modal-backdrop";
+ wrap.innerHTML=`
+  <div class="modal" role="dialog" aria-modal="true">
+   <h2>${title}</h2>
+   <p>${message}</p>
+   <div class="row" style="margin-top:20px">
+    <button class="gray" type="button" data-action="no">No — Keep Working</button>
+    <button class="${yesClass}" type="button" data-action="yes">${yesText}</button>
+   </div>
+  </div>`;
+ document.body.appendChild(wrap);
+
+ const close=()=>wrap.remove();
+ wrap.querySelector('[data-action="no"]').onclick=close;
+ wrap.querySelector('[data-action="yes"]').onclick=()=>{ close(); onYes(); };
+ wrap.querySelector('[data-action="no"]').focus();
+
+ wrap.addEventListener("click", (e)=>{
+   if(e.target===wrap) close();
+ });
+}
+
+function confirmMachineOccupied(){
+ showControlConfirmation(
+  "Are you sure?",
+  "Save your exact place because this machine is occupied, then return to the Machine Store?",
+  "Yes — Save My Place",
+  "yellow",
+  machineOccupied
+ );
+}
+
+function confirmReturnToMenu(){
+ showControlConfirmation(
+  "Are you sure?",
+  "Return to the Machine Store now? Your unfinished place will be saved as pending.",
+  "Yes — Return to Menu",
+  "primary",
+  returnToMenuFromMachine
+ );
+}
+
+document.addEventListener("keydown", (e)=>{
+ if(e.key==="Escape"){
+   const modal=document.querySelector(".modal-backdrop");
+   if(modal) modal.remove();
+ }
+});
+
+function machineOccupied(){
+ if(currentMachine===null) return;
+ saveMachineProgress();
+ occupiedState[currentMachine]=true;
+ clearTimer();
+ currentMachine=null;
+ menu();
+}
+
+function returnToMenuFromMachine(){
+ if(currentMachine===null) return;
+ saveMachineProgress();
+ occupiedState[currentMachine]=false;
+ clearTimer();
+ currentMachine=null;
+ menu();
+}
+
+
+function openWeightPicker(i){
+  clearWeightSpin();
+  weightPickerMachine=i;
+  const weights=machineWeights[i];
+  const chosen=selectedWeights[i];
+  weightPickerIndex=Math.max(0,weights.indexOf(chosen));
+  renderWeightPicker();
+}
+
+function closeWeightPicker(){
+  clearWeightSpin();
+  weightPickerMachine=null;
+  menu();
+}
+
+function useWeightPicker(){
+  if(weightPickerMachine===null) return;
+
+  const i=weightPickerMachine;
+  selectedWeights[i]=machineWeights[i][weightPickerIndex];
+  const chosen=selectedWeights[i];
+  const label=document.getElementById("selectedWeightLabel");
+  if(label) label.textContent=`${chosen} lb`;
+
+  // DURING a machine: keep the exact current part/set and return directly
+  // to that Work Card. No trip through the Machine Store.
+  if(currentMachine===i){
+    const savedStage=currentStage, savedCard=currentCard;
+    weightPickerMachine=null;
+    clearWeightSpin();
+    currentStage=savedStage;
+    currentCard=savedCard;
+    showWorkCard();
+    return;
+  }
+
+  // FROM the Machine Store: accepting the weight now starts that machine's
+  // movie immediately at Work Card 1/4 instead of returning to the menu.
+  if(!completed[i]){
+    weightPickerMachine=null;
+    clearWeightSpin();
+    currentMachine=i;
+    currentStage=0;
+    currentCard=0;
+    paused=false;
+    headerLine.textContent=`${machines[i][0]} — Movie`;
+    showWorkCard();
+    return;
+  }
+
+  // If a completed machine's weight is changed from the menu, preserve the
+  // existing completed state and simply return to the Machine Store.
+  weightPickerMachine=null;
+  clearWeightSpin();
+  menu();
+}
+
+function moveWeight(delta){
+  if(weightPickerMachine===null) return;
+  const weights=machineWeights[weightPickerMachine];
+  weightPickerIndex=(weightPickerIndex+delta+weights.length)%weights.length;
+  reelVisualOffset=0;
+  updateReelVisual();
+}
+
+function clearWeightSpin(){
+  // Kept as a harmless compatibility helper for the manual reel.
+}
+
+let reelPointerStartY=null;
+let reelPointerLastY=null;
+let reelDragActive=false;
+let reelDragStartIndex=0;
+let reelVisualOffset=0;
+
+function beginReelDrag(e){
+  if(weightPickerMachine===null) return;
+  reelDragActive=true;
+  reelDragStartIndex=weightPickerIndex;
+  reelPointerStartY=e.clientY;
+  reelPointerLastY=e.clientY;
+  reelVisualOffset=0;
+  const reel=document.getElementById('weightReel');
+  if(reel){
+    reel.classList.add('dragging');
+    if(reel.setPointerCapture) reel.setPointerCapture(e.pointerId);
+  }
+}
+
+function moveReelDrag(e){
+  if(!reelDragActive || weightPickerMachine===null) return;
+  const totalDelta=e.clientY-reelPointerStartY;
+  const stepPx=42;
+  let steps=Math.round(-totalDelta/stepPx);
+  const weights=machineWeights[weightPickerMachine];
+  weightPickerIndex=Math.max(0,Math.min(weights.length-1,reelDragStartIndex+steps));
+  reelVisualOffset=-(totalDelta + steps*stepPx);
+  updateReelVisual();
+}
+
+function endReelDrag(){
+  if(!reelDragActive) return;
+  reelDragActive=false;
+  reelVisualOffset=0;
+  const reel=document.getElementById('weightReel');
+  if(reel) reel.classList.remove('dragging');
+  updateReelVisual();
+}
+
+
+function weightReelItems(weights, centerIndex){
+  // Show a bounded window around the selected weight so the reel stays compact.
+  const radius = 4;
+  const start = Math.max(0, centerIndex - radius);
+  const end = Math.min(weights.length - 1, centerIndex + radius);
+  const items = [];
+  for(let idx=start; idx<=end; idx++){
+    items.push({idx, value:weights[idx]});
+  }
+  return items;
+}
+
+function updateReelVisual(){
+  if(weightPickerMachine===null) return;
+  const weights=machineWeights[weightPickerMachine];
+  const chosen=weights[weightPickerIndex];
+  const reel=document.getElementById("weightReel");
+  const label=document.getElementById("selectedWeightLabel");
+  const useBtn=document.getElementById("useWeightBtn");
+
+  if(label) label.textContent=`${chosen} lb`;
+  if(useBtn) useBtn.textContent=`☑️ Use ${chosen} lb for Today`;
+  if(!reel) return;
+
+  const items=weightReelItems(weights,weightPickerIndex);
+  reel.innerHTML=items.map(item=>{
+    const distance=Math.abs(item.idx-weightPickerIndex);
+    const cls=item.idx===weightPickerIndex
+      ? "center-weight"
+      : distance===1 ? "near-weight" : "";
+    return `<div class="weight-reel-item ${cls}">${item.value} lb</div>`;
+  }).join("");
+
+  // Keep the selected item visually centered. The reel is rebuilt after each
+  // manual move, so there is no automatic spinning.
+  const centerItem=reel.querySelector(".center-weight");
+  if(centerItem){
+    centerItem.scrollIntoView({block:"center", inline:"nearest"});
+  }
+}
+
+function renderWeightPicker(){
+  const i=weightPickerMachine;
+  if(i===null) return;
+  const weights=machineWeights[i];
+  const chosen=weights[weightPickerIndex];
+  const items=weightReelItems(weights,weightPickerIndex);
+  const pickerTitle=currentMachine===i ? "🎰 Change Today's Weight" : "🎰 Choose Today's Weight";
+  const during=currentMachine===i;
+  headerLine.textContent=`${machines[i][0]} — Weight Selector`;
+  app.innerHTML=`
+  <section class="card menu-card">
+    <div>
+      <div class="step">🎬 ${machines[i][0]} • WEIGHT SELECTOR</div>
+      <div class="title">${pickerTitle}</div>
+      <div class="subtitle">${machines[i][1]} • Machine ${i+1} of 11</div>
+      <div class="weight-picker">
+        <div class="weight-picker-head">
+          <div class="weight-picker-title">3D Digital Weight Reel</div>
+          <div class="weight-picker-current">Selected: <span id="selectedWeightLabel" class="weight-chip">${chosen} lb</span></div>
+        </div>
+        <div class="reel-wrap">
+          <div class="reel-center-line"></div>
+          <div id="weightReel" class="weight-reel" aria-label="Swipe to choose a weight" onpointerdown="beginReelDrag(event)" onpointermove="moveReelDrag(event)" onpointerup="endReelDrag()" onpointercancel="endReelDrag()">
+            ${items.map(item=>`<div class="weight-reel-item ${item.idx===weightPickerIndex?'center-weight':Math.abs(item.idx-weightPickerIndex)===1?'near-weight':''}">${item.value} lb</div>`).join('')}
+          </div>
+        </div>
+        <div class="weight-reel-help">☝️ Swipe the reel up or down with your finger to choose your weight</div>
+        <div class="weight-reel-controls">
+          <button class="secondary" onclick="moveWeight(-1)">◀ One Weight Down</button>
+          <button class="secondary" onclick="moveWeight(1)">One Weight Up ▶</button>
+        </div>
+        <div class="weight-spin-note">No automatic spinning. The center weight is the one you are selecting.</div>
+      </div>
+    </div>
+    <div class="controls">
+      <button id="useWeightBtn" class="primary" style="width:100%" onclick="useWeightPicker()">☑️ Use ${chosen} lb for Today</button>
+      ${during ? '<button class="gray" style="width:100%" onclick="renderWorkCardWithoutWeightChange()">↩️ Back to Current Set</button>' : '<button class="gray" style="width:100%" onclick="closeWeightPicker()">🏠 Back to Machine Store</button>'}
+    </div>
+  </section>`;
+  updateReelVisual();
+}
+
+function renderWorkCardWithoutWeightChange(){
+  clearWeightSpin();
+  weightPickerMachine=null;
+  showWorkCard();
+}
+
+function startMachine(i){
+ beginWorkoutSession();
+ clearTimer();
+ currentMachine=i;
+ occupiedState[i]=false;
+ const saved=resumeState[i];
+ if(saved && !completed[i]){
+   currentStage=saved.stage;
+   currentCard=saved.card;
+   paused=false;
+   headerLine.textContent=`${machines[i][0]} — Resume`;
+   if(saved.scene==="rest"){
+     seconds=Math.max(0, saved.seconds ?? 0);
+     renderRest();
+     if(seconds<=0){
+       const next=document.getElementById("nextSceneBtn");
+       if(next) next.classList.remove("hidden");
+     }
+   } else {
+     showWorkCard();
+   }
+   return;
+ }
+ currentStage=0;
+ currentCard=0;
+ paused=false;
+ headerLine.textContent=`${machines[i][0]} — Movie`;
+ showWorkCard();
+}
+
+function getStages(i){
+  return machineStages[i] || [machines[i][0]];
+}
+
+function getStageTitle(i){
+  return getStages(i)[currentStage];
+}
+
+function showWorkCard(){
+ const i=currentMachine;
+ const stages=getStages(i);
+ const stageTitle=getStageTitle(i);
+ const set=currentCard+1;
+ headerLine.textContent=`${stageTitle} — Work Card ${set}/4`;
+ const done=setDone[i]>=set;
+ app.innerHTML=`
+ <section class="card">
+  <div>
+   <div class="step">🎬 ${machines[i][0]} • PART ${currentStage+1}/${stages.length} • WORK CARD ${set}/4</div>
+   <div class="title">${stageTitle}</div>
+   <div class="subtitle">${machines[i][1]} • ${selectedWeights[i]} lb • Set ${set} of 4</div>
+   <button class="secondary" style="width:100%;margin:4px 0 16px" onclick="openWeightPicker(${i})">🎰 Change Today's Weight • ${selectedWeights[i]} lb</button>
+   <div class="note">Complete this position/side physically. When finished, tap Set Complete to move to the Rest Card.</div>
+   <div style="margin-top:42px;font-size:34px;font-weight:800;text-align:center">Set ${set}</div>
+   <div style="font-size:42px;font-weight:800;text-align:center;margin:18px 0">Reps 10</div>
+   <div class="center status">${done?"☑️ Set completed":"⬜ Set not completed yet"}</div>
+  </div>
+  <div class="controls">
+   <button class="primary" style="width:100%" onclick="completeSet()">☑️ Tap Set Complete → NEXT SCENE</button>
+   <div class="workout-controls">
+    <button class="workout-controls-toggle" type="button" onclick="toggleWorkoutControls(this)">⚙️ Workout Controls <span aria-hidden="true">▼</span></button>
+    <div class="workout-controls-panel" hidden>
+     <button class="yellow" type="button" onclick="confirmMachineOccupied()">🟨 Machine Occupied — Save My Place</button>
+     <button class="gray" type="button" onclick="confirmReturnToMenu()">🏠 Return to Menu</button>
+     <button class="red" type="button" onclick="requestEndWorkout()">◻️ End Workout Today</button>
+    </div>
+   </div>
+  </div>
+ </section>`;
+}
+
+
+function completeSet(){
+  if(currentMachine === null) return;
+  // The button is the actual scene-change control:
+  // Work Card → mark this set complete → Rest Card.
+  setDone[currentMachine] = Math.max(setDone[currentMachine], currentCard + 1);
+  if(!setWeights[currentMachine]) {
+    setWeights[currentMachine] = getStages(currentMachine).map(() => Array(4).fill(null));
+  }
+  if(!setWeights[currentMachine][currentStage]) {
+    setWeights[currentMachine][currentStage] = Array(4).fill(null);
+  }
+  setWeights[currentMachine][currentStage][currentCard] = selectedWeights[currentMachine];
+  showRestCard();
+}
+
+
+
+function showRestCard(){
+  if(currentMachine === null) return;
+  const restNo = currentCard + 1;
+  seconds = 75;          // default rest: 1:15
+  paused = false;
+  renderRest();          // reveal the Rest Timer scene
+}
+
+
+function renderRest(){
+ const i=currentMachine, restNo=currentCard+1;
+ headerLine.textContent=`${machines[i][0]} — Rest Card ${restNo}/4`;
+ app.innerHTML=`
+ <section class="card">
+  <div>
+   <div class="step">🎬 ${machines[i][0]} • REST CARD ${restNo}/4</div>
+   <div class="title">Rest Timer</div>
+   <div class="subtitle">${machines[i][0]} • Rest ${restNo} of 4</div>
+   <div class="big">${fmt(seconds)}</div>
+   <div class="center" style="font-size:20px">${paused?"⏸️ Rest paused":"⏱️ Rest ready / running"}</div>
+
+   <div class="controls">
+    <div class="row">
+     <button class="green" onclick="startRest(30)">▶️ Start 0:30</button>
+     <button class="orange" onclick="startRest(75)">▶️ Start 1:15</button>
+    </div>
+    <button class="secondary" onclick="resumeRest()">▶️ Resume Rest</button>
+    <button class="gray" onclick="pauseRest()">⏸️ Pause Rest</button>
+   </div>
+
+   
+   <button id="nextSceneBtn" class="primary hidden" style="width:100%;margin-top:18px" onclick="nextScene()">▶️ NEXT →</button>
+  </div>
+
+  <div class="workout-controls">
+   <button class="workout-controls-toggle" type="button" onclick="toggleWorkoutControls(this)">⚙️ Workout Controls <span aria-hidden="true">▼</span></button>
+   <div class="workout-controls-panel" hidden>
+    <button class="yellow" type="button" onclick="confirmMachineOccupied()">🟨 Machine Occupied — Save My Place</button>
+    <button class="gray" type="button" onclick="confirmReturnToMenu()">🏠 Return to Menu</button>
+    <button class="red" type="button" onclick="requestEndWorkout()">◻️ End Workout Today</button>
+   </div>
+  </div>
+ </section>`;
+}
+
+
+function startRest(s){clearTimer();seconds=s;paused=false;renderRest();timer=setInterval(()=>{if(!paused){seconds--;renderRest();if(seconds<=0){
+       clearTimer();
+       seconds=0;
+       navigator.vibrate?.(30000);
+       renderRest();
+       const next=document.getElementById("nextSceneBtn");
+       if(next){
+         next.disabled=false;
+         next.classList.remove("hidden");
+         next.textContent="▶️ NEXT →";
+       }
+     }}},1000);}
+function pauseRest(){paused=true;renderRest();}
+function resumeRest(){paused=false;if(!timer) startRest(seconds); else renderRest();}
+function finishRestNow(){clearTimer();seconds=0;advanceAfterRest();}
+function nextScene(){
+  if(seconds > 0) return;
+  advanceAfterRest();
+}
+
+function advanceAfterRest(){
+  if(currentMachine === null) return;
+
+  const stages = getStages(currentMachine);
+
+  // After the fourth set, move to the next stage/side if this machine has one.
+  if(currentCard >= 3){
+    if(currentStage < stages.length - 1){
+      currentStage++;
+      currentCard=0;
+      showWorkCard();
+    } else {
+      completed[currentMachine]=true;
+      setDone[currentMachine]=4;
+      resumeState[currentMachine]=null;
+      occupiedState[currentMachine]=false;
+      showMachineComplete();
+    }
+  } else {
+    currentCard++;
+    showWorkCard();
+  }
+}
+
+function showMachineComplete(){
+ clearTimer();
+ const i=currentMachine;
+ headerLine.textContent=`${machines[i][0]} — Complete`;
+ app.innerHTML=`
+ <section class="card">
+  <div class="center">
+   <div class="step">🎬 FINAL SCENE</div>
+   <div class="title" style="margin-top:20px">${machines[i][0]}</div>
+   <div class="subtitle">${getStages(i).length > 1 ? getStages(i).length + " parts complete • 4 / 4 sets per part" : "4 / 4 sets complete"}</div>
+   <div style="font-size:72px;margin:45px 0">✅</div>
+   <div class="note">Machine complete. Return to the Machine Store to choose the next movie.</div>
+  </div>
+  <div class="controls">
+   <button class="gray" style="width:100%" onclick="returnToMenuFromMachine()">🏠 Return to Menu</button>
+   <button class="red" style="width:100%" onclick="requestEndWorkout()">◻️ End Workout Today</button>
+  </div>
+ </section>`;
+}
+
+
+function clearTimer(){
+ if(timer){clearInterval(timer);timer=null;}
+ if(treadmillTimer){clearInterval(treadmillTimer);treadmillTimer=null;}
+}
+function fmt(s){return String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0");}
+function pauseWorkout(){alert("Workout pause placeholder: the movie position is preserved.");}
+
+function resetWorkout(){
+ if(confirm("Reset today's workout?")){
+   clearTimer();
+   completed=Array(11).fill(false);
+   setDone=Array(11).fill(0);
+   setWeights=machines.map((m,i)=>getStages(i).map(()=>Array(4).fill(null)));
+   showDetailedSetWeights=false;
+   selectedWeights=machines.map((m,i)=>parseInt(m[2],10));
+   resumeState=Array(11).fill(null);
+   occupiedState=Array(11).fill(false);
+   currentStage=0;
+   currentCard=0;
+   step2Unlocked=false;
+   treadmillSeconds=2700;
+   workoutStartedAt=null;
+   workoutEndedAt=null;
+   workoutEndReason=null;
+   menu();
+ }
+}
+
+function requestEndWorkout(){
+ const existing=document.querySelector(".modal-backdrop");
+ if(existing) return;
+
+ const wrap=document.createElement("div");
+ wrap.className="modal-backdrop";
+ wrap.innerHTML=`
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="endTitle">
+   <h2 id="endTitle">Are you sure?</h2>
+   <p>End today's workout now? Your completed work will be kept in the closing summary.</p>
+   <div class="row" style="margin-top:20px">
+    <button class="gray" type="button" data-action="no">No — Keep Working</button>
+    <button class="red" type="button" data-action="yes">Yes — End Workout</button>
+   </div>
+  </div>`;
+ document.body.appendChild(wrap);
+
+ const close=()=>wrap.remove();
+ wrap.querySelector('[data-action="no"]').onclick=close;
+ wrap.querySelector('[data-action="yes"]').onclick=()=>{ close(); endWorkout(); };
+ wrap.querySelector('[data-action="no"]').focus();
+
+ wrap.addEventListener("click", (e)=>{
+   if(e.target===wrap) close();
+ });
+}
+
+function formatDateTime(d){
+ if(!d) return "Not recorded";
+ return d.toLocaleString([], {
+   month:"short", day:"numeric", year:"numeric",
+   hour:"numeric", minute:"2-digit"
+ });
+}
+
+function formatDuration(start, end){
+ if(!start || !end) return "Not recorded";
+ const ms=Math.max(0, end.getTime()-start.getTime());
+ const totalMinutes=Math.floor(ms/60000);
+ const hours=Math.floor(totalMinutes/60);
+ const minutes=totalMinutes%60;
+ if(hours>0) return `${hours} hr ${minutes} min`;
+ return `${minutes} min`;
+}
+
+
+function getMachineSetWeightRecords(i){
+  const stages=getStages(i);
+  const records=[];
+  stages.forEach((stageName,stageIndex)=>{
+    const weights=(setWeights[i] && setWeights[i][stageIndex]) || [];
+    weights.forEach((weight,setIndex)=>{
+      if(weight !== null && weight !== undefined){
+        records.push({stageIndex,stageName,setIndex,weight});
+      }
+    });
+  });
+  return records;
+}
+
+function formatWeightSummary(i){
+  const stages=getStages(i);
+  const records=getMachineSetWeightRecords(i);
+  if(!records.length) return `${machines[i][0]} #${i+1}: Weight history not recorded.`;
+
+  return stages.map((stageName,stageIndex)=>{
+    const partRecords=records.filter(r=>r.stageIndex===stageIndex);
+    if(!partRecords.length) return "";
+
+    const prefix=stages.length>1 ? `${stageName}: ` : `${machines[i][0]} #${i+1}: `;
+    const unique=[...new Set(partRecords.map(r=>r.weight))];
+
+    if(unique.length===1){
+      return `${prefix}${partRecords.length} sets × ${unique[0]} lb`;
+    }
+
+    // Default summary shows only the meaningful weight changes.
+    // Example: "Sets 1–3 — 58 lb → Set 4 — 78 lb".
+    const groups=[];
+    let startSet=partRecords[0].setIndex;
+    let endSet=startSet;
+    let currentWeight=partRecords[0].weight;
+
+    for(let n=1;n<partRecords.length;n++){
+      const r=partRecords[n];
+      if(r.weight===currentWeight && r.setIndex===endSet+1){
+        endSet=r.setIndex;
+      }else{
+        groups.push({start:startSet,end:endSet,weight:currentWeight});
+        startSet=endSet=r.setIndex;
+        currentWeight=r.weight;
+      }
+    }
+    groups.push({start:startSet,end:endSet,weight:currentWeight});
+
+    const changeText=groups.map(g=>{
+      const label=g.start===g.end
+        ? `Set ${g.start+1}`
+        : `Sets ${g.start+1}–${g.end+1}`;
+      return `${label} — ${g.weight} lb`;
+    }).join(" → ");
+
+    return `${prefix}${changeText}`;
+  }).filter(Boolean).join("<br>");
+}
+
+function formatDetailedWeightSummary(i){
+  const stages=getStages(i);
+  const records=getMachineSetWeightRecords(i);
+  if(!records.length) return "<li>Weight history not recorded.</li>";
+
+  return stages.map((stageName,stageIndex)=>{
+    const partRecords=records.filter(r=>r.stageIndex===stageIndex);
+    if(!partRecords.length) return "";
+
+    const heading=stages.length>1
+      ? `<b>${stageName}</b>`
+      : `<b>${machines[i][0]} #${i+1}</b>`;
+    const lines=partRecords
+      .map(r=>`Set ${r.setIndex+1} — ${r.weight} lb`)
+      .join(" &nbsp;•&nbsp; ");
+
+    return `<li>${heading}<br><span class="muted">${lines}</span></li>`;
+  }).filter(Boolean).join("");
+}
+
+function toggleDetailedSetWeights(){
+  showDetailedSetWeights=!showDetailedSetWeights;
+  const panel=document.getElementById("detailedSetWeightsPanel");
+  const btn=document.getElementById("toggleSetWeightsBtn");
+
+  if(panel){
+    panel.innerHTML=showDetailedSetWeights
+      ? `<ul class="summary-list">${machines.map((m,i)=>completed[i] ? formatDetailedWeightSummary(i) : "").filter(Boolean).join("") || "<li>No completed machine weight history.</li>"}</ul>`
+      : "";
+  }
+  if(btn){
+    btn.textContent=showDetailedSetWeights
+      ? "🙈 Hide Set-by-Set Weights"
+      : "📋 Show Set-by-Set Weights";
+  }
+}
+
+function showWorkoutSummary(){
+ clearTimer();
+ currentMachine=null;
+ workoutEndedAt=new Date();
+ workoutEndReason="Ended early";
+ headerLine.textContent="Workout Summary";
+
+ const count=completed.filter(Boolean).length;
+ const completedNames=machines
+   .map((m,i)=>completed[i] ? m[0] : null)
+   .filter(Boolean);
+
+ const incompleteNames=machines
+   .map((m,i)=>!completed[i] && !resumeState[i] ? m[0] : null)
+   .filter(Boolean);
+
+ const treadmillStatus =
+   treadmillSeconds===0 ? "Completed — 45:00 target reached" :
+   step2Unlocked ? "Skipped / ended early" :
+   "Not started";
+
+ const completedList=completedNames.length
+   ? completedNames.map(name=>`<li>✅ ${name}</li>`).join("")
+   : `<li>None of the 11 machines were completed.</li>`;
+
+ const remainingList=incompleteNames.length
+   ? incompleteNames.map(name=>`<li>⬜ ${name}</li>`).join("")
+   : `<li>All 11 machines completed.</li>`;
+
+ app.innerHTML=`
+ <section class="card end-card">
+  <div>
+   <div class="step">🎬 END SCENE</div>
+   <div class="title" style="margin-top:18px">Workout Summary</div>
+   <div class="subtitle">Today's workout has been closed. Your completed work is preserved in this prototype.</div>
+
+   <div class="note">
+    <b>Session started:</b> ${formatDateTime(workoutStartedAt)}<br>
+    <b>Session ended:</b> ${formatDateTime(workoutEndedAt)}<br>
+    <b>Total session time:</b> ${formatDuration(workoutStartedAt, workoutEndedAt)}
+   </div>
+
+   <div style="margin-top:22px;font-size:28px;font-weight:800;text-align:center">
+    ${count} / 11 machines complete
+   </div>
+
+   <div class="note" style="margin-top:18px">
+    <b>Step 1 — Treadmill:</b> ${treadmillStatus}
+   </div>
+
+   <h3 style="margin:24px 0 8px;font-size:23px">Completed</h3>
+   <ul class="summary-list">${completedList}</ul>
+
+   <h3 style="margin:24px 0 8px;font-size:23px">Machine Occupied / Return Later</h3>
+   <ul class="summary-list">${
+     machines.map((m,i)=>occupiedState[i] && !completed[i]
+       ? `<li>🟨 ${m[0]} — ${resumeLabel(i)}</li>` : "").filter(Boolean).join("")
+     || "<li>None.</li>"
+   }</ul>
+
+   <h3 style="margin:24px 0 8px;font-size:23px">Pending / Return Later</h3>
+   <ul class="summary-list">${
+     machines.map((m,i)=>resumeState[i] && !completed[i] && !occupiedState[i]
+       ? `<li>🔵 ${m[0]} — ${resumeLabel(i)}</li>` : "").filter(Boolean).join("")
+     || "<li>None.</li>"
+   }</ul>
+
+   <h3 style="margin:24px 0 8px;font-size:23px">Weight Changes by Set</h3>
+   <div class="note">
+    ${completedNames.length
+      ? completedNames.map(name=>{
+          const i=machines.findIndex(m=>m[0]===name);
+          return `<div style="margin-bottom:10px">${formatWeightSummary(i)}</div>`;
+        }).join("")
+      : "No completed machine weight history."}
+   </div>
+
+   <button id="toggleSetWeightsBtn" class="secondary" style="width:100%;margin-top:10px" onclick="toggleDetailedSetWeights()">📋 Show Set-by-Set Weights</button>
+   <div id="detailedSetWeightsPanel"></div>
+
+   <h3 style="margin:24px 0 8px;font-size:23px">Not started</h3>
+   <ul class="summary-list">${remainingList}</ul>
+  </div>
+
+  <div class="controls">
+   <button class="primary" style="width:100%" onclick="menu()">🏠 Return to Machine Store</button>
+  </div>
+ </section>`;
+}
+
+function endWorkout(){
+ clearTimer();
+ showWorkoutSummary();
+}
+
+menu();
+</script>
+</body>
+</html>
